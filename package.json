@@ -1,11 +1,13 @@
 {
-  "name": "render-cmd",
+  "name": "render-minecraft-bot-panel",
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "mineflayer": "^4.20.1",
+    "vec3": "^0.1.10"
   }
 }
