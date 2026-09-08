@@ -8,33 +8,33 @@ app.use(express.json());
 let bot = null;
 let antiAfkInterval = null;
 let antiAfkState = false;
+let autoReconnect = false;
+let lastConnectionConfig = null;
 let botLogs = [];
 
 function log(msg) {
   const time = new Date().toLocaleTimeString();
   botLogs.unshift(`[${time}] ${msg}`);
-  if (botLogs.length > 30) botLogs.pop();
+  if (botLogs.length > 40) botLogs.pop();
 }
 
-// Anti-AFK Fonksiyonu (Dairesel hareket ve zıplama)
 function startAntiAfk() {
   if (antiAfkInterval) clearInterval(antiAfkInterval);
   antiAfkState = true;
-  log("Anti-AFK başlatıldı.");
+  log("Anti-AFK aktif edildi.");
   
   let step = 0;
   antiAfkInterval = setInterval(() => {
     if (!bot || !bot.entity) return;
     
-    // Zıplama & Etrafa Bakma & İleri/Geri Adım
     bot.setControlState('jump', true);
-    setTimeout(() => bot && bot.setControlState('jump', false), 400);
+    setTimeout(() => bot && bot.setControlState('jump', false), 300);
 
     const yaw = (step % 4) * (Math.PI / 2);
     bot.look(yaw, 0, true);
 
     bot.setControlState('forward', true);
-    setTimeout(() => bot && bot.setControlState('forward', false), 800);
+    setTimeout(() => bot && bot.setControlState('forward', false), 600);
 
     step++;
   }, 4000);
@@ -50,197 +50,219 @@ function stopAntiAfk() {
   log("Anti-AFK durduruldu.");
 }
 
-// Web Arayüzü (HTML + CSS + JS)
-app.get('/', (req, res) => {
-  const isConnected = bot ? true : false;
+function createMinecraftBot(config) {
+  lastConnectionConfig = config;
   
+  const options = {
+    host: config.host,
+    port: parseInt(config.port) || 25565,
+    username: config.username
+  };
+
+  if (config.version && config.version.trim() !== "") {
+    options.version = config.version.trim();
+  }
+
+  log(`${config.host}:${options.port} adresine (${config.username}) bağlanılıyor...`);
+
+  try {
+    bot = mineflayer.createBot(options);
+
+    bot.on('spawn', () => {
+      log("✅ Bot oyuna giriş yaptı!");
+      if (antiAfkState) startAntiAfk();
+    });
+
+    bot.on('chat', (username, message) => {
+      log(`💬 <${username}>: ${message}`);
+    });
+
+    bot.on('kicked', (reason) => {
+      log(`⚠️ Sunucudan atıldı: ${reason}`);
+    });
+
+    bot.on('error', (err) => {
+      log(`❌ Bağlantı hatası: ${err.message}`);
+    });
+
+    bot.on('end', () => {
+      log("🔴 Bağlantı koptu.");
+      stopAntiAfk();
+      bot = null;
+
+      // Otomatik Yeniden Bağlanma Mekanizması
+      if (autoReconnect && lastConnectionConfig) {
+        log("🔄 5 saniye içinde otomatik tekrar bağlanılıyor...");
+        setTimeout(() => {
+          if (autoReconnect) createMinecraftBot(lastConnectionConfig);
+        }, 5000);
+      }
+    });
+
+  } catch (err) {
+    log(`❌ Başlatma hatası: ${err.message}`);
+  }
+}
+
+// Ana Arayüz (Sayfa Yenilenmeyen AJAX Mimarisi)
+app.get('/', (req, res) => {
   res.send(`
     <!DOCTYPE html>
     <html lang="tr">
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>Minecraft Bot Control Panel</title>
+      <title>Mineflayer Panel</title>
       <style>
-        body { background: #121212; color: #fff; font-family: 'Segoe UI', Tahoma, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
-        h1 { color: #00ff88; text-align: center; }
-        .card { background: #1e1e1e; padding: 20px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #333; }
-        input, select { width: 100%; padding: 10px; margin: 8px 0; background: #2a2a2a; color: #fff; border: 1px solid #444; border-radius: 5px; box-sizing: border-box; }
-        .btn-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
-        button { padding: 12px; font-weight: bold; border: none; border-radius: 5px; cursor: pointer; transition: 0.2s; }
-        .btn-green { background: #00c853; color: white; }
-        .btn-red { background: #d50000; color: white; }
-        .btn-blue { background: #29b6f6; color: white; }
-        .btn-orange { background: #ff9100; color: white; }
-        button:hover { opacity: 0.8; }
-        .status { font-weight: bold; color: ${isConnected ? '#00ff88' : '#ff4444'}; }
-        .logs { background: #000; color: #00ff00; padding: 15px; height: 180px; overflow-y: auto; font-family: monospace; border-radius: 5px; }
+        body { background: #121212; color: #fff; font-family: monospace; padding: 15px; max-width: 600px; margin: 0 auto; }
+        .card { background: #1e1e1e; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #333; }
+        input { width: 100%; padding: 10px; margin: 5px 0; background: #2a2a2a; color: #fff; border: 1px solid #444; border-radius: 4px; box-sizing: border-box; }
+        .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
+        button { padding: 10px; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; background: #333; color: #fff; }
+        .btn-green { background: #00c853; }
+        .btn-red { background: #d50000; }
+        .btn-orange { background: #ff9100; }
+        .btn-blue { background: #29b6f6; color: #000; }
+        .logs { background: #000; color: #00ff00; padding: 10px; height: 180px; overflow-y: auto; border-radius: 4px; font-size: 12px; }
       </style>
     </head>
     <body>
-      <h1>🎮 Mineflayer Bot Kontrol Paneli</h1>
-      
-      <div class="card">
-        <h3>Sunucu Bağlantısı (<span class="status">${isConnected ? 'BAĞLI' : 'BAĞLI DEĞİL'}</span>)</h3>
-        <form action="/connect" method="POST">
-          <input type="text" name="host" placeholder="Sunucu IP (Örn: play.hypixel.net veya localhost)" required />
-          <input type="number" name="port" placeholder="Port (Varsayılan: 25565)" value="25565" required />
-          <input type="text" name="username" placeholder="Bot Nick (Örn: AFK_Bot_724)" required />
-          <input type="text" name="version" placeholder="Sürüm (Örn: 1.16.5, 1.20.1 veya boş bırakın)" />
-          <button type="submit" class="btn-green" style="width:100%">Sunucuya Bağlan</button>
-        </form>
-        ${isConnected ? `
-          <form action="/disconnect" method="POST" style="margin-top:10px;">
-            <button type="submit" class="btn-red" style="width:100%">Bağlantıyı Kes</button>
-          </form>
-        ` : ''}
-      </div>
+      <h2>🎮 MC Bot Panel</h2>
 
-      ${isConnected ? `
       <div class="card">
-        <h3>🕹️ Bot Hareket & Anti-AFK Kontrolleri</h3>
-        <p>Anti-AFK Durumu: <b>${antiAfkState ? '🟢 AÇIK' : '🔴 KAPALI'}</b></p>
+        <h3>Sunucu Bağlantısı</h3>
+        <input type="text" id="host" placeholder="IP Adresi" value="${lastConnectionConfig?.host || ''}">
+        <input type="number" id="port" placeholder="Port" value="${lastConnectionConfig?.port || '25565'}">
+        <input type="text" id="username" placeholder="Nick" value="${lastConnectionConfig?.username || ''}">
+        <input type="text" id="version" placeholder="Sürüm (Örn: 1.16.5)" value="${lastConnectionConfig?.version || ''}">
         
-        <div style="display:flex; gap:10px; margin-bottom:15px;">
-          <form action="/anti-afk/start" method="POST" style="flex:1"><button class="btn-orange" style="width:100%">Anti-AFK Başlat</button></form>
-          <form action="/anti-afk/stop" method="POST" style="flex:1"><button class="btn-red" style="width:100%">Anti-AFK Durdur</button></form>
+        <div style="margin: 10px 0;">
+          <label><input type="checkbox" id="autoConnectCheck" ${autoReconnect ? 'checked' : ''} onchange="toggleAutoReconnect(this.checked)"> Otomatik Düşünce Tekrar Bağlan</label>
         </div>
 
-        <h4>Manuel Yön Kontrolü:</h4>
-        <div class="btn-grid">
-          <div></div>
-          <form action="/move" method="POST"><input type="hidden" name="dir" value="forward"><button class="btn-blue" style="width:100%">⬆️ İleri</button></form>
-          <div></div>
-          
-          <form action="/move" method="POST"><input type="hidden" name="dir" value="left"><button class="btn-blue" style="width:100%">⬅️ Sol</button></form>
-          <form action="/move" method="POST"><input type="hidden" name="dir" value="jump"><button class="btn-orange" style="width:100%">🦘 Zıpla</button></form>
-          <form action="/move" method="POST"><input type="hidden" name="dir" value="right"><button class="btn-blue" style="width:100%">➡️ Sağ</button></form>
-          
-          <div></div>
-          <form action="/move" method="POST"><input type="hidden" name="dir" value="back"><button class="btn-blue" style="width:100%">⬇️ Geri</button></form>
-          <div></div>
-        </div>
-
-        <h4 style="margin-top:15px;">💬 Oyuna Chat Mesajı Gönder:</h4>
-        <form action="/chat" method="POST">
-          <input type="text" name="message" placeholder="Mesajınız..." required />
-          <button type="submit" class="btn-green" style="width:100%">Gönder</button>
-        </form>
+        <button class="btn-green" style="width:100%" onclick="connectBot()">Bağlan</button>
+        <button class="btn-red" style="width:100%; margin-top:5px;" onclick="disconnectBot()">Bağlantıyı Kes</button>
       </div>
-      ` : ''}
 
       <div class="card">
-        <h3>📜 Canlı Konsol Logları</h3>
-        <div class="logs">
-          ${botLogs.map(l => `<div>${l}</div>`).join('')}
+        <h3>Aksiyonlar</h3>
+        <button class="btn-orange" onclick="apiCall('/anti-afk/start')">Anti-AFK Başlat</button>
+        <button class="btn-red" onclick="apiCall('/anti-afk/stop')">Anti-AFK Durdur</button>
+
+        <h4>Kontrol</h4>
+        <div class="grid">
+          <div></div><button class="btn-blue" onclick="move('forward')">⬆️ İleri</button><div></div>
+          <button class="btn-blue" onclick="move('left')">⬅️ Sol</button>
+          <button class="btn-orange" onclick="move('jump')">🦘 Zıpla</button>
+          <button class="btn-blue" onclick="move('right')">➡️ Sağ</button>
+          <div></div><button class="btn-blue" onclick="move('back')">⬇️ Geri</button><div></div>
         </div>
+
+        <input type="text" id="chatMsg" placeholder="Chat mesajı veya komut (/login vs.)">
+        <button class="btn-green" style="width:100%" onclick="sendChat()">Gönder</button>
       </div>
+
+      <div class="card">
+        <h3>Konsol</h3>
+        <div class="logs" id="logBox">Yükleniyor...</div>
+      </div>
+
+      <script>
+        // Sayfa YENİLENMEDEN arka planda istek atma fonksiyonu
+        async function apiCall(url, data = {}) {
+          await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+          });
+        }
+
+        function connectBot() {
+          const host = document.getElementById('host').value;
+          const port = document.getElementById('port').value;
+          const username = document.getElementById('username').value;
+          const version = document.getElementById('version').value;
+          apiCall('/connect', { host, port, username, version });
+        }
+
+        function disconnectBot() {
+          apiCall('/disconnect');
+        }
+
+        function move(dir) {
+          apiCall('/move', { dir });
+        }
+
+        function sendChat() {
+          const msg = document.getElementById('chatMsg').value;
+          if(!msg) return;
+          apiCall('/chat', { message: msg });
+          document.getElementById('chatMsg').value = '';
+        }
+
+        function toggleAutoReconnect(status) {
+          apiCall('/auto-reconnect', { status });
+        }
+
+        // Sayfa yenilenmeden logları her 2 saniyede bir güncelle
+        setInterval(async () => {
+          const res = await fetch('/logs');
+          const logs = await res.json();
+          document.getElementById('logBox').innerHTML = logs.map(l => '<div>' + l + '</div>').join('');
+        }, 2000);
+      </script>
     </body>
     </html>
   `);
 });
 
-// Bağlantı İsteği
+// API Endpointleri (Yenilenmesiz İşlemler)
+app.get('/logs', (req, res) => res.json(botLogs));
+
 app.post('/connect', (req, res) => {
-  const { host, port, username, version } = req.body;
-  
-  if (bot) {
-    bot.end();
-    stopAntiAfk();
-  }
-
-  log(`${host}:${port} adresine ${username} nickiyle bağlanılıyor...`);
-
-  const options = {
-    host: host,
-    port: parseInt(port) || 25565,
-    username: username
-  };
-
-  if (version && version.trim() !== "") {
-    options.version = version.trim();
-  }
-
-  try {
-    bot = mineflayer.createBot(options);
-
-    bot.on('spawn', () => {
-      log("✅ Bot sunucuya başarıyla doğdu (spawn oldu)!");
-    });
-
-    bot.on('chat', (username, message) => {
-      log(`💬 [CHAT] <${username}>: ${message}`);
-    });
-
-    bot.on('kicked', (reason) => {
-      log(`⚠️ Sunucudan atıldı: ${reason}`);
-      stopAntiAfk();
-      bot = null;
-    });
-
-    bot.on('error', (err) => {
-      log(`❌ Hata oluştu: ${err.message}`);
-    });
-
-    bot.on('end', () => {
-      log("🔴 Sunucu bağlantısı kesildi.");
-      stopAntiAfk();
-      bot = null;
-    });
-
-  } catch (err) {
-    log(`❌ Bağlantı hatası: ${err.message}`);
-  }
-
-  res.redirect('/');
+  if (bot) { bot.end(); stopAntiAfk(); }
+  createMinecraftBot(req.body);
+  res.json({ status: 'ok' });
 });
 
-// Bağlantıyı Kes
 app.post('/disconnect', (req, res) => {
-  if (bot) {
-    bot.quit();
-    bot = null;
-    stopAntiAfk();
-    log("Bot elle bağlantıyı kesti.");
-  }
-  res.redirect('/');
+  autoReconnect = false;
+  if (bot) { bot.quit(); bot = null; }
+  stopAntiAfk();
+  log("Bağlantı kullanıcı tarafından kesildi.");
+  res.json({ status: 'ok' });
 });
 
-// Hareket Yönlendirme
+app.post('/auto-reconnect', (req, res) => {
+  autoReconnect = req.body.status;
+  log(`Otomatik tekrar bağlanma: ${autoReconnect ? 'AÇIK' : 'KAPALI'}`);
+  res.json({ status: 'ok' });
+});
+
 app.post('/move', (req, res) => {
   const { dir } = req.body;
   if (bot) {
     if (dir === 'jump') {
       bot.setControlState('jump', true);
-      setTimeout(() => bot && bot.setControlState('jump', false), 500);
+      setTimeout(() => bot && bot.setControlState('jump', false), 400);
     } else {
       bot.setControlState(dir, true);
-      setTimeout(() => bot && bot.setControlState(dir, false), 1000);
+      setTimeout(() => bot && bot.setControlState(dir, false), 800);
     }
   }
-  res.redirect('/');
+  res.json({ status: 'ok' });
 });
 
-// Anti-AFK
-app.post('/anti-afk/start', (req, res) => {
-  startAntiAfk();
-  res.redirect('/');
-});
+app.post('/anti-afk/start', (req, res) => { startAntiAfk(); res.json({ status: 'ok' }); });
+app.post('/anti-afk/stop', (req, res) => { stopAntiAfk(); res.json({ status: 'ok' }); });
 
-app.post('/anti-afk/stop', (req, res) => {
-  stopAntiAfk();
-  res.redirect('/');
-});
-
-// Chat Mesajı
 app.post('/chat', (req, res) => {
-  const { message } = req.body;
-  if (bot && message) {
-    bot.chat(message);
-    log(`💬 [BİZ]: ${message}`);
+  if (bot && req.body.message) {
+    bot.chat(req.body.message);
+    log(`💬 [BİZ]: ${req.body.message}`);
   }
-  res.redirect('/');
+  res.json({ status: 'ok' });
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Panel çalışıyor: http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`Panel aktif: ${PORT}`));
