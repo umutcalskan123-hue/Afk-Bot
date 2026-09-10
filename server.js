@@ -1,5 +1,7 @@
 const express = require('express');
 const mineflayer = require('mineflayer');
+const https = require('https');
+const http = require('http');
 const app = express();
 
 app.use(express.urlencoded({ extended: true }));
@@ -265,4 +267,18 @@ app.post('/chat', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Panel aktif: ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Panel aktif: ${PORT}`);
+  
+  // Render Self-Ping (Kendi Kendini Uyanık Tutma)
+  setInterval(() => {
+    const url = 'https://afk-bot-u09x.onrender.com';
+    const requester = url.startsWith('https') ? https : http;
+    
+    requester.get(url, (res) => {
+      console.log('Self-ping başarılı: Sunucu uyanık tutuluyor.');
+    }).on('error', (err) => {
+      console.log('Self-ping hatası:', err.message);
+    });
+  }, 4 * 60 * 1000); // Her 4 dakikada bir otomatik tetiklenir
+});
