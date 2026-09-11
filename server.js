@@ -1,5 +1,6 @@
 const express = require('express');
 const mineflayer = require('mineflayer');
+const { mineflayer: viewer } = require('prismarine-viewer');
 const https = require('https');
 const http = require('http');
 const app = express();
@@ -11,6 +12,8 @@ let bot = null;
 let antiAfkInterval = null;
 let antiAfkState = false;
 let autoReconnect = false;
+let aimAssistState = false;
+let aimAssistInterval = null;
 let lastConnectionConfig = null;
 let botLogs = [];
 
@@ -20,6 +23,7 @@ function log(msg) {
   if (botLogs.length > 40) botLogs.pop();
 }
 
+// Anti-AFK Fonksiyonu
 function startAntiAfk() {
   if (antiAfkInterval) clearInterval(antiAfkInterval);
   antiAfkState = true;
@@ -52,6 +56,36 @@ function stopAntiAfk() {
   log("Anti-AFK durduruldu.");
 }
 
+// Aim Assist (En Yakın Oyuncuya Kilitlenme)
+function startAimAssist() {
+  if (aimAssistInterval) clearInterval(aimAssistInterval);
+  aimAssistState = true;
+  log("🎯 Aim Assist (Otomatik Hedef Kilitlenme) başlatıldı.");
+
+  aimAssistInterval = setInterval(() => {
+    if (!bot || !bot.entity) return;
+
+    // Kendisi hariç en yakın oyuncuyu filtrele
+    const filter = (e) => e.type === 'player' && e.username !== bot.username;
+    const target = bot.nearestEntity(filter);
+
+    if (target) {
+      // Hedefin kafa hizasına (eye height) bak
+      const targetPos = target.position.offset(0, target.height, 0);
+      bot.lookAt(targetPos);
+    }
+  }, 100); // 100ms aralıkla sürekli kafayı hedefe çevirir
+}
+
+function stopAimAssist() {
+  if (aimAssistInterval) {
+    clearInterval(aimAssistInterval);
+    aimAssistInterval = null;
+  }
+  aimAssistState = false;
+  log("🎯 Aim Assist durduruldu.");
+}
+
 function createMinecraftBot(config) {
   lastConnectionConfig = config;
   
@@ -73,6 +107,14 @@ function createMinecraftBot(config) {
     bot.on('spawn', () => {
       log("✅ Bot oyuna giriş yaptı!");
       if (antiAfkState) startAntiAfk();
+
+      // 3D Canlı İzleme Sunucusu (Viewer) Başlatılıyor
+      try {
+        viewer(bot, { port: 3001, firstPerson: true });
+        log("🌐 3D Canlı İzleme Aktif Edildi.");
+      } catch (vErr) {
+        log(`⚠️ 3D Görünüm başlatılamadı: ${vErr.message}`);
+      }
     });
 
     bot.on('chat', (username, message) => {
@@ -90,9 +132,9 @@ function createMinecraftBot(config) {
     bot.on('end', () => {
       log("🔴 Bağlantı koptu.");
       stopAntiAfk();
+      stopAimAssist();
       bot = null;
 
-      // Otomatik Yeniden Bağlanma Mekanizması
       if (autoReconnect && lastConnectionConfig) {
         log("🔄 5 saniye içinde otomatik tekrar bağlanılıyor...");
         setTimeout(() => {
@@ -106,7 +148,7 @@ function createMinecraftBot(config) {
   }
 }
 
-// Ana Arayüz (Sayfa Yenilenmeyen AJAX Mimarisi)
+// Web Arayüzü
 app.get('/', (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -114,9 +156,9 @@ app.get('/', (req, res) => {
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>Mineflayer Panel</title>
+      <title>Mineflayer Ultra Panel</title>
       <style>
-        body { background: #121212; color: #fff; font-family: monospace; padding: 15px; max-width: 600px; margin: 0 auto; }
+        body { background: #121212; color: #fff; font-family: monospace; padding: 15px; max-width: 650px; margin: 0 auto; }
         .card { background: #1e1e1e; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #333; }
         input { width: 100%; padding: 10px; margin: 5px 0; background: #2a2a2a; color: #fff; border: 1px solid #444; border-radius: 4px; box-sizing: border-box; }
         .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
@@ -125,11 +167,12 @@ app.get('/', (req, res) => {
         .btn-red { background: #d50000; }
         .btn-orange { background: #ff9100; }
         .btn-blue { background: #29b6f6; color: #000; }
+        .btn-purple { background: #aa00ff; color: #fff; }
         .logs { background: #000; color: #00ff00; padding: 10px; height: 180px; overflow-y: auto; border-radius: 4px; font-size: 12px; }
       </style>
     </head>
     <body>
-      <h2>🎮 MC Bot Panel</h2>
+      <h2>🎮 MC Bot Control & 3D Viewer Panel</h2>
 
       <div class="card">
         <h3>Sunucu Bağlantısı</h3>
@@ -147,11 +190,18 @@ app.get('/', (req, res) => {
       </div>
 
       <div class="card">
-        <h3>Aksiyonlar</h3>
-        <button class="btn-orange" onclick="apiCall('/anti-afk/start')">Anti-AFK Başlat</button>
-        <button class="btn-red" onclick="apiCall('/anti-afk/stop')">Anti-AFK Durdur</button>
+        <h3>Aksiyonlar & Modlar</h3>
+        <div style="display:flex; gap:5px; margin-bottom:10px;">
+          <button class="btn-orange" style="flex:1" onclick="apiCall('/anti-afk/start')">Anti-AFK Aç</button>
+          <button class="btn-red" style="flex:1" onclick="apiCall('/anti-afk/stop')">Anti-AFK Kapat</button>
+        </div>
 
-        <h4>Kontrol</h4>
+        <div style="display:flex; gap:5px;">
+          <button class="btn-purple" style="flex:1" onclick="apiCall('/aim/start')">🎯 Aim Assist Aç</button>
+          <button class="btn-red" style="flex:1" onclick="apiCall('/aim/stop')">🎯 Aim Assist Kapat</button>
+        </div>
+
+        <h4>Manuel Kontrol</h4>
         <div class="grid">
           <div></div><button class="btn-blue" onclick="move('forward')">⬆️ İleri</button><div></div>
           <button class="btn-blue" onclick="move('left')">⬅️ Sol</button>
@@ -170,7 +220,6 @@ app.get('/', (req, res) => {
       </div>
 
       <script>
-        // Sayfa YENİLENMEDEN arka planda istek atma fonksiyonu
         async function apiCall(url, data = {}) {
           await fetch(url, {
             method: 'POST',
@@ -187,13 +236,8 @@ app.get('/', (req, res) => {
           apiCall('/connect', { host, port, username, version });
         }
 
-        function disconnectBot() {
-          apiCall('/disconnect');
-        }
-
-        function move(dir) {
-          apiCall('/move', { dir });
-        }
+        function disconnectBot() { apiCall('/disconnect'); }
+        function move(dir) { apiCall('/move', { dir }); }
 
         function sendChat() {
           const msg = document.getElementById('chatMsg').value;
@@ -206,7 +250,6 @@ app.get('/', (req, res) => {
           apiCall('/auto-reconnect', { status });
         }
 
-        // Sayfa yenilenmeden logları her 2 saniyede bir güncelle
         setInterval(async () => {
           const res = await fetch('/logs');
           const logs = await res.json();
@@ -218,11 +261,11 @@ app.get('/', (req, res) => {
   `);
 });
 
-// API Endpointleri (Yenilenmesiz İşlemler)
+// API Endpointleri
 app.get('/logs', (req, res) => res.json(botLogs));
 
 app.post('/connect', (req, res) => {
-  if (bot) { bot.end(); stopAntiAfk(); }
+  if (bot) { bot.end(); stopAntiAfk(); stopAimAssist(); }
   createMinecraftBot(req.body);
   res.json({ status: 'ok' });
 });
@@ -231,6 +274,7 @@ app.post('/disconnect', (req, res) => {
   autoReconnect = false;
   if (bot) { bot.quit(); bot = null; }
   stopAntiAfk();
+  stopAimAssist();
   log("Bağlantı kullanıcı tarafından kesildi.");
   res.json({ status: 'ok' });
 });
@@ -258,6 +302,9 @@ app.post('/move', (req, res) => {
 app.post('/anti-afk/start', (req, res) => { startAntiAfk(); res.json({ status: 'ok' }); });
 app.post('/anti-afk/stop', (req, res) => { stopAntiAfk(); res.json({ status: 'ok' }); });
 
+app.post('/aim/start', (req, res) => { startAimAssist(); res.json({ status: 'ok' }); });
+app.post('/aim/stop', (req, res) => { stopAimAssist(); res.json({ status: 'ok' }); });
+
 app.post('/chat', (req, res) => {
   if (bot && req.body.message) {
     bot.chat(req.body.message);
@@ -270,15 +317,15 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Panel aktif: ${PORT}`);
   
-  // Render Self-Ping (Kendi Kendini Uyanık Tutma)
+  // Render Self-Ping (Kapanmayı Engelleme)
   setInterval(() => {
     const url = 'https://afk-bot-u09x.onrender.com';
     const requester = url.startsWith('https') ? https : http;
     
     requester.get(url, (res) => {
-      console.log('Self-ping başarılı: Sunucu uyanık tutuluyor.');
+      console.log('Self-ping başarılı.');
     }).on('error', (err) => {
       console.log('Self-ping hatası:', err.message);
     });
-  }, 4 * 60 * 1000); // Her 4 dakikada bir otomatik tetiklenir
+  }, 4 * 60 * 1000);
 });
