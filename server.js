@@ -1,6 +1,5 @@
 const express = require('express');
 const mineflayer = require('mineflayer');
-const { mineflayer: viewer } = require('prismarine-viewer');
 const https = require('https');
 const http = require('http');
 const app = express();
@@ -60,21 +59,19 @@ function stopAntiAfk() {
 function startAimAssist() {
   if (aimAssistInterval) clearInterval(aimAssistInterval);
   aimAssistState = true;
-  log("🎯 Aim Assist (Otomatik Hedef Kilitlenme) başlatıldı.");
+  log("🎯 Aim Assist başlatıldı.");
 
   aimAssistInterval = setInterval(() => {
     if (!bot || !bot.entity) return;
 
-    // Kendisi hariç en yakın oyuncuyu filtrele
     const filter = (e) => e.type === 'player' && e.username !== bot.username;
     const target = bot.nearestEntity(filter);
 
     if (target) {
-      // Hedefin kafa hizasına (eye height) bak
       const targetPos = target.position.offset(0, target.height, 0);
       bot.lookAt(targetPos);
     }
-  }, 100); // 100ms aralıkla sürekli kafayı hedefe çevirir
+  }, 100);
 }
 
 function stopAimAssist() {
@@ -107,14 +104,7 @@ function createMinecraftBot(config) {
     bot.on('spawn', () => {
       log("✅ Bot oyuna giriş yaptı!");
       if (antiAfkState) startAntiAfk();
-
-      // 3D Canlı İzleme Sunucusu (Viewer) Başlatılıyor
-      try {
-        viewer(bot, { port: 3001, firstPerson: true });
-        log("🌐 3D Canlı İzleme Aktif Edildi.");
-      } catch (vErr) {
-        log(`⚠️ 3D Görünüm başlatılamadı: ${vErr.message}`);
-      }
+      if (aimAssistState) startAimAssist();
     });
 
     bot.on('chat', (username, message) => {
@@ -156,9 +146,9 @@ app.get('/', (req, res) => {
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>Mineflayer Ultra Panel</title>
+      <title>Mineflayer Panel</title>
       <style>
-        body { background: #121212; color: #fff; font-family: monospace; padding: 15px; max-width: 650px; margin: 0 auto; }
+        body { background: #121212; color: #fff; font-family: monospace; padding: 15px; max-width: 600px; margin: 0 auto; }
         .card { background: #1e1e1e; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #333; }
         input { width: 100%; padding: 10px; margin: 5px 0; background: #2a2a2a; color: #fff; border: 1px solid #444; border-radius: 4px; box-sizing: border-box; }
         .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
@@ -172,7 +162,7 @@ app.get('/', (req, res) => {
       </style>
     </head>
     <body>
-      <h2>🎮 MC Bot Control & 3D Viewer Panel</h2>
+      <h2>🎮 MC Bot Control Panel</h2>
 
       <div class="card">
         <h3>Sunucu Bağlantısı</h3>
@@ -317,7 +307,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Panel aktif: ${PORT}`);
   
-  // Render Self-Ping (Kapanmayı Engelleme)
+  // Self-Ping
   setInterval(() => {
     const url = 'https://afk-bot-u09x.onrender.com';
     const requester = url.startsWith('https') ? https : http;
